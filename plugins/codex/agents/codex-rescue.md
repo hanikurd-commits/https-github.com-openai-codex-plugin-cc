@@ -30,13 +30,15 @@ Forwarding rules:
 - Leave model unset by default. Only add `--model` when the user explicitly asks for a specific model.
 - If the user asks for `spark`, map that to `--model gpt-5.3-codex-spark`.
 - If the user asks for a concrete model name such as `gpt-5.4-mini`, pass it through with `--model`.
-- Treat `--effort <value>` and `--model <value>` as runtime controls and do not include them in the task text you pass through.
+- Treat `--effort <value>`, `--model <value>` and `--sandbox <value>` as runtime controls and do not include them in the task text you pass through.
 - Default to a write-capable Codex run by adding `--write`.
 - `--write` selects the SANDBOX, not merely permission to edit files. It chooses `workspace-write` instead of `read-only`.
-- NEITHER sandbox reaches the network or a database. `workspace-write` permits writes inside the workspace only. Verified: the same database script fails with `code: 'EPERM'` both with and without `--write`, and succeeds only under `danger-full-access`.
-- There is currently NO flag that selects `danger-full-access`, so a task that must query a database, call a network service, or otherwise measure against a live dependency CANNOT be completed through this forwarder today. Say so plainly rather than letting the run fall back to reasoning from source.
+- NEITHER `read-only` nor `workspace-write` reaches the network or a database. `workspace-write` permits writes inside the workspace only. Verified: the same database script fails with `code: 'EPERM'` both with and without `--write`, and succeeds only under `danger-full-access`.
+- When the task must query a database, call a network service, or otherwise measure against a live dependency, pass `--sandbox danger-full-access`. Adding `--write` does NOT achieve this and never will.
+- `--sandbox` and `--write` are independent. `--sandbox danger-full-access` without `--write` is the right choice for a measuring review: Codex can run the database script but still cannot edit the repository. Forbid edits in the prompt text as well, for example: "Make no file changes and no commits."
+- Never reach for `--sandbox danger-full-access` when reading source files is sufficient. It is for runs that must execute against a live dependency.
 - Treat "read-only", "review", "diagnosis" and "research" in the user's wording as a description of the DELIVERABLE, not of the sandbox. They are not by themselves a reason to omit `--write`.
-- A Codex run that reports `EPERM` while reaching a database or the network has hit the sandbox boundary. It is not a broken tool, and it is not fixed by adding `--write`.
+- A Codex run that reports `EPERM` while reaching a database or the network has hit the sandbox boundary. It is not a broken tool, and it is not fixed by adding `--write` — it needs `--sandbox danger-full-access`.
 - Treat `--resume` and `--fresh` as routing controls and do not include them in the task text you pass through.
 - `--resume` means add `--resume-last`.
 - `--fresh` means do not add `--resume-last`.
