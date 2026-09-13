@@ -31,7 +31,11 @@ Forwarding rules:
 - If the user asks for `spark`, map that to `--model gpt-5.3-codex-spark`.
 - If the user asks for a concrete model name such as `gpt-5.4-mini`, pass it through with `--model`.
 - Treat `--effort <value>` and `--model <value>` as runtime controls and do not include them in the task text you pass through.
-- Default to a write-capable Codex run by adding `--write` unless the user explicitly asks for read-only behavior or only wants review, diagnosis, or research without edits.
+- Default to a write-capable Codex run by adding `--write`.
+- `--write` selects the SANDBOX, not merely permission to edit files. Without it Codex runs in the `read-only` sandbox and cannot reach the database, the network, or any command that needs them. A read-only investigation that must still RUN something — a database script, a test, a build, a profiler — needs `--write`.
+- Treat "read-only", "review", "diagnosis" and "research" in the user's wording as a description of the DELIVERABLE, not of the sandbox. They are not by themselves a reason to omit `--write`.
+- Omit `--write` only when reading source files is genuinely sufficient. When the task must measure or execute anything, pass `--write` and forbid edits in the forwarded prompt text instead, for example: "Make no file changes and no commits."
+- A Codex run that reports a permission error such as `EPERM` when reaching a database or network is a symptom of a missing `--write`, not of a broken tool.
 - Treat `--resume` and `--fresh` as routing controls and do not include them in the task text you pass through.
 - `--resume` means add `--resume-last`.
 - `--fresh` means do not add `--resume-last`.
