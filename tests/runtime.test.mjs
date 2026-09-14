@@ -784,6 +784,48 @@ test("task forwards model selection and reasoning effort to app-server turn/star
   assert.equal(fakeState.lastTurnStart.effort, "low");
 });
 
+test("task accepts max and ultra reasoning efforts", () => {
+  for (const effort of ["max", "ultra"]) {
+    const repo = makeTempDir();
+    const binDir = makeTempDir();
+    const statePath = path.join(binDir, "fake-codex-state.json");
+    installFakeCodex(binDir);
+    initGitRepo(repo);
+    fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+    run("git", ["add", "README.md"], { cwd: repo });
+    run("git", ["commit", "-m", "init"], { cwd: repo });
+
+    const result = run("node", [SCRIPT, "task", "--model", "gpt-6-astra", "--effort", effort, "diagnose the failing test"], {
+      cwd: repo,
+      env: buildEnv(binDir)
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const fakeState = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    assert.equal(fakeState.lastTurnStart.model, "gpt-6-astra");
+    assert.equal(fakeState.lastTurnStart.effort, effort);
+  }
+});
+
+test("task rejects unknown reasoning efforts locally", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+
+  const result = run("node", [SCRIPT, "task", "--effort", "bogus", "diagnose the failing test"], {
+    cwd: repo,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unsupported reasoning effort "bogus"/);
+  assert.match(result.stderr, /max, ultra/);
+});
+
 test("task logs reasoning summaries and assistant messages to the job log", () => {
   const repo = makeTempDir();
   const binDir = makeTempDir();
