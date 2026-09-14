@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createBrokerEndpoint, parseBrokerEndpoint } from "./broker-endpoint.mjs";
 import { resolveStateDir } from "./state.mjs";
+import { terminateProcessTree } from "./process.mjs";
 
 export const PID_FILE_ENV = "CODEX_COMPANION_APP_SERVER_PID_FILE";
 export const LOG_FILE_ENV = "CODEX_COMPANION_APP_SERVER_LOG_FILE";
@@ -112,6 +113,7 @@ async function isBrokerEndpointReady(endpoint) {
 
 export async function ensureBrokerSession(cwd, options = {}) {
   const existing = loadBrokerSession(cwd);
+  const killProcess = options.killProcess ?? terminateProcessTree;
   if (existing && (await isBrokerEndpointReady(existing.endpoint))) {
     return existing;
   }
@@ -123,7 +125,7 @@ export async function ensureBrokerSession(cwd, options = {}) {
       logFile: existing.logFile ?? null,
       sessionDir: existing.sessionDir ?? null,
       pid: existing.pid ?? null,
-      killProcess: options.killProcess ?? null
+      killProcess
     });
     clearBrokerSession(cwd);
   }
@@ -154,7 +156,7 @@ export async function ensureBrokerSession(cwd, options = {}) {
       logFile,
       sessionDir,
       pid: child.pid ?? null,
-      killProcess: options.killProcess ?? null
+      killProcess
     });
     return null;
   }
