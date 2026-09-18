@@ -99,20 +99,105 @@ export function clearBrokerSession(cwd) {
   }
 }
 
+// A broker that is mid-turn keeps its event loop busy, so 150 ms is not enough
+// budget for it to accept a probe connection. Failing the probe used to be treated
+// as "the broker is gone", which then tore down a perfectly healthy broker.
+const BROKER_READY_PROBE_TIMEOUT_MS = 3000;
+
+// Stale-lock timeout for the broker creation lock below.
+const BROKER_LOCK_STALE_MS = 30000;
+const BROKER_LOCK_WAIT_MS = 15000;
+
 async function isBrokerEndpointReady(endpoint) {
   if (!endpoint) {
     return false;
   }
   try {
-    return await waitForBrokerEndpoint(endpoint, 150);
+    return await waitForBrokerEndpoint(endpoint, BROKER_READY_PROBE_TIMEOUT_MS);
   } catch {
     return false;
   }
 }
 
+// A failed probe only proves the broker did not answer in time; it does not prove
+// the process is gone. Never tear down a broker whose process is still alive.
+function isBrokerProcessAlive(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // ESRCH is the only code that proves the process is gone. EPERM (and anything
+    // else) means we cannot tell, so assume it is alive and leave it alone.
+    return error?.code !== "ESRCH";
+  }
+}
+
+function brokerLockPath(cwd) {
+  return path.join(resolveStateDir(cwd), "broker.lock");
+}
+
+// Concurrent clients can all observe `loadBrokerSession() === null` and each spawn a
+// broker; the last writer wins and the other brokers are orphaned together with the
+// app-servers (and in-flight turns) they own. Serialize the check-then-create window.
+async function withBrokerLock(cwd, fn) {
+  const lockFile = brokerLockPath(cwd);
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+
+  const deadline = Date.now() + BROKER_LOCK_WAIT_MS;
+  let held = false;
+  while (Date.now() < deadline) {
+    try {
+      const fd = fs.openSync(lockFile, "wx");
+      fs.writeSync(fd, String(process.pid));
+      fs.closeSync(fd);
+      held = true;
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      try {
+        if (Date.now() - fs.statSync(lockFile).mtimeMs > BROKER_LOCK_STALE_MS) {
+          fs.unlinkSync(lockFile);
+          continue;
+        }
+      } catch {
+        // The holder released it between statSync and now; retry.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  try {
+    // Falling through without the lock keeps the previous (racy) behaviour rather
+    // than failing the caller outright.
+    return await fn();
+  } finally {
+    if (held) {
+      try {
+        fs.unlinkSync(lockFile);
+      } catch {
+        // Already removed by a stale-lock sweep.
+      }
+    }
+  }
+}
+
 export async function ensureBrokerSession(cwd, options = {}) {
+  return withBrokerLock(cwd, () => ensureBrokerSessionLocked(cwd, options));
+}
+
+async function ensureBrokerSessionLocked(cwd, options = {}) {
   const existing = loadBrokerSession(cwd);
   if (existing && (await isBrokerEndpointReady(existing.endpoint))) {
+    return existing;
+  }
+
+  if (existing && isBrokerProcessAlive(existing.pid)) {
+    // Alive but slow to answer: it is busy, not dead. Reuse it.
     return existing;
   }
 
