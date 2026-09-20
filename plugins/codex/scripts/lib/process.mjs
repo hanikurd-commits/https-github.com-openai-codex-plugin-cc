@@ -64,9 +64,12 @@ export function terminateProcessTree(pid, options = {}) {
   const killImpl = options.killImpl ?? process.kill.bind(process);
 
   if (platform === "win32") {
+    // taskkill is directly executable on Windows. Its slash options must never pass through a
+    // shell: Git Bash rewrites /PID into a Windows path and the kill never reaches the tree.
     const result = runCommandImpl("taskkill", ["/PID", String(pid), "/T", "/F"], {
       cwd: options.cwd,
-      env: options.env
+      env: options.env,
+      shell: false
     });
 
     if (!result.error && result.status === 0) {
